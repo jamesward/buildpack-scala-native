@@ -1,0 +1,7 @@
+target/
+.bsp/
+.bloop/
+.metals/
+.heroku-sbt-cache/
+project/project/
+project/target/

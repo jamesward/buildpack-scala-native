@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# Heroku classic buildpack: release
+# Usage: bin/release <BUILD_DIR>
+#
+# Emits release metadata. Picks a sensible default `web` process: the native
+# executable that bin/compile placed under `bin/`. The user's Procfile (if
+# any) takes precedence over default_process_types at run time.
+set -euo pipefail
+shopt -s nullglob
+
+BUILD_DIR=${1:-}
+
+default_web=""
+if [[ -n $BUILD_DIR && -d $BUILD_DIR/bin ]]; then
+  for f in "$BUILD_DIR"/bin/*; do
+    [[ -f $f && -x $f && $f != *.bat ]] || continue
+    default_web="bin/$(basename "$f")"
+    break
+  done
+fi
+
+cat <<EOF
+---
+addons: []
+config_vars: {}
+EOF
+
+if [[ -n $default_web ]]; then
+  cat <<EOF
+default_process_types:
+  web: $default_web
+EOF
+else
+  echo "default_process_types: {}"
+fi

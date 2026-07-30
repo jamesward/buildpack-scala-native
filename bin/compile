@@ -1,0 +1,242 @@
+#!/usr/bin/env bash
+# Heroku classic buildpack: compile (Scala Native)
+# Usage: bin/compile <BUILD_DIR> <CACHE_DIR> [ENV_DIR]
+#
+# Strategy:
+#   1. Point sbt/coursier/ivy caches at CACHE_DIR so deps persist between builds.
+#   2. Run `./sbt nativeLink` to ahead-of-time compile the app to a native
+#      executable (this needs a JDK *and* an LLVM/clang toolchain at build
+#      time, but the produced binary needs neither at runtime).
+#   3. Run a second `./sbt 'show Compile / nativeLink'` and parse the printed
+#      path. `nativeLink` is a `File`-typed task, so `show` prints the absolute
+#      path of the produced binary. Two cold starts is fine — the path
+#      (`target/scala-<ver>/<name>-out`) varies by Scala version and project
+#      name, and `show <key>` is core sbt and reliable in every environment.
+#   4. Replace BUILD_DIR contents with JUST the native binary (as `bin/<name>`)
+#      and the user-supplied Procfile. The source tree, sbt, project/, target/,
+#      and any build-time JDK (.jdk from heroku/jvm) are intentionally dropped —
+#      the slug is a self-contained native executable, nothing else.
+#
+# Multi-project builds: set the SBT_PROJECT config var to the subproject ID
+# whose `nativeLink` should drive the slug (e.g.
+# `heroku config:set SBT_PROJECT=cli`). When unset, the buildpack uses the
+# root project's `nativeLink`.
+#
+# Result: the slug root contains `bin/<name>` (the native executable) and,
+# if present, a `Procfile`. Procfile entries must be relative to the slug
+# root (e.g. `web: bin/<name>`).
+
+set -euo pipefail
+shopt -s dotglob nullglob
+
+BUILD_DIR=${1:-}
+CACHE_DIR=${2:-}
+ENV_DIR=${3:-}
+
+status() { echo "-----> $*"; }
+fail()   { echo " !     $*" >&2; exit 1; }
+
+# Strip sbt 2.0 supershell / ANSI control sequences and CRs. sbt 2.0 emits an
+# `ESC[0J` (erase-below) after task output even with -no-colors, and on a cold
+# build can render the value line without a trailing newline — gluing it to the
+# following `[success]` line. Both are normalized away here.
+strip_ansi() { sed 's/\x1b\[[0-9;?]*[A-Za-z]//g' | tr -d '\r'; }
+
+[[ -n $BUILD_DIR ]] || fail "usage: bin/compile <BUILD_DIR> <CACHE_DIR> [ENV_DIR]"
+[[ -d $BUILD_DIR ]] || fail "BUILD_DIR not found: $BUILD_DIR"
+[[ -n $CACHE_DIR ]] || fail "CACHE_DIR not provided"
+mkdir -p "$CACHE_DIR"
+
+# Convert to absolute paths so we can chdir freely.
+BUILD_DIR=$(cd "$BUILD_DIR" && pwd)
+CACHE_DIR=$(cd "$CACHE_DIR" && pwd)
+
+# ---- export user config vars from ENV_DIR -----------------------------------
+# Heroku passes a directory of files; each filename is a config var name and
+# its content is the value. We expose them so sbt sees them at build time.
+if [[ -n $ENV_DIR && -d $ENV_DIR ]]; then
+  for f in "$ENV_DIR"/*; do
+    [[ -f $f ]] || continue
+    name=$(basename "$f")
+    # skip vars that would let users hijack the build
+    case "$name" in
+      PATH|GIT_DIR|LD_*|JAVA_TOOL_OPTIONS) continue ;;
+    esac
+    export "$name=$(cat "$f")"
+  done
+fi
+
+# ---- cleanup registry -------------------------------------------------------
+declare -a CLEANUP_PATHS=()
+cleanup() {
+  local rc=$?
+  for p in "${CLEANUP_PATHS[@]}"; do
+    rm -rf -- "$p" 2>/dev/null || true
+  done
+  exit $rc
+}
+trap cleanup EXIT
+
+# ---- caching ----------------------------------------------------------------
+# Persist coursier (sbt 2 default) + ivy + sbt boot across builds.
+# shellcheck source=bin/util/sbt-env.sh
+. "$(dirname "$0")/util/sbt-env.sh"
+sbt_env_configure "$CACHE_DIR"
+
+# ---- run sbt nativeLink and capture the produced binary ---------------------
+cd "$BUILD_DIR"
+[[ -f ./sbt ]] || fail "no ./sbt wrapper in $BUILD_DIR"
+chmod +x ./sbt
+
+# Multi-project support: if SBT_PROJECT is set (typically via
+# `heroku config:set SBT_PROJECT=<id>`), scope every sbt command to that
+# subproject. When unset, sbt uses the current (root) project.
+SBT_PROJECT=${SBT_PROJECT:-}
+if [[ -n $SBT_PROJECT ]]; then
+  link_cmd="$SBT_PROJECT/nativeLink"
+  show_key="$SBT_PROJECT / Compile / nativeLink"
+  status "Targeting subproject: $SBT_PROJECT"
+else
+  link_cmd="nativeLink"
+  show_key="Compile / nativeLink"
+fi
+
+status "Running ./sbt $link_cmd"
+./sbt "$link_cmd"
+
+# Ask sbt for the produced binary path. With sbt 2.0 we disable the supershell
+# so task output is plain, newline-terminated log lines instead of cursor-
+# addressed redraws. We still defensively strip any residual escapes.
+#
+# Extraction is deliberately tolerant: `nativeLink` is a `File` task, so `show`
+# prints an absolute path. We take the last absolute path in the output that
+# exists on disk as a regular file. A non-match yields an empty string (never a
+# pipeline failure), so the explicit check below — not `set -e` — owns the
+# error path and always prints the captured output for triage.
+status "Asking sbt for $show_key"
+set +e
+SBT_OUT=$(./sbt -no-colors -Dsbt.supershell=false "show $show_key" 2>&1)
+SBT_RC=$?
+set -e
+if [[ $SBT_RC -ne 0 ]]; then
+  echo "----- ./sbt show output -----" >&2
+  echo "$SBT_OUT" >&2
+  echo "-----------------------------" >&2
+  fail "./sbt 'show $show_key' failed (exit $SBT_RC)"
+fi
+
+# Pull candidate absolute paths from the show output and keep the last one that
+# is an existing regular file (the produced executable).
+BINARY=""
+while IFS= read -r cand; do
+  [[ -n $cand ]] || continue
+  [[ -f $cand ]] && BINARY=$cand
+done < <(printf '%s\n' "$SBT_OUT" | strip_ansi | grep -oE '/[^[:space:]]+' || true)
+
+# Filesystem fallback: scala-native writes the executable directly under
+# target/scala-<ver>/ — named `<name>-out` (<= 0.5.7) or plain `<name>`
+# (>= 0.5.8). This makes the buildpack resilient to future sbt output-format
+# changes. We look one level below any `target/scala-*` dir (the binary is not
+# nested under `native/`), pick executable regular files that aren't jars, and
+# take the most recently modified one. When SBT_PROJECT is set the file lives
+# under that subproject's target/ tree, which is still matched by this glob.
+if [[ -z $BINARY || ! -f $BINARY ]]; then
+  BINARY=$(find "$BUILD_DIR" -type f -perm -u+x -regextype posix-extended \
+             -regex '.*/target/scala-[^/]+/[^/]+' \
+             ! -name '*.jar' 2>/dev/null \
+           | while IFS= read -r f; do printf '%s\t%s\n' "$(stat -c %Y "$f" 2>/dev/null || echo 0)" "$f"; done \
+           | sort -n | tail -1 | cut -f2- || true)
+fi
+
+if [[ -z $BINARY || ! -f $BINARY ]]; then
+  echo "----- ./sbt show output -----" >&2
+  echo "$SBT_OUT" >&2
+  echo "-----------------------------" >&2
+  fail "could not determine the native binary produced by '$show_key'"
+fi
+
+status "Native binary: ${BINARY#$BUILD_DIR/}"
+
+# ---- locate the Procfile that applies to this slug --------------------------
+# The slug is a bare native binary, so the Procfile that should ship is the
+# one belonging to the built project. For a multi-project build that is the
+# subproject named by SBT_PROJECT; the sbt project ID need not match its
+# directory name, so ask sbt for the subproject's baseDirectory rather than
+# guessing `$BUILD_DIR/$SBT_PROJECT`. (Single-project builds use the repo-root
+# Procfile, so we skip this extra cold boot for them.)
+PROJECT_BASE=""
+if [[ -n $SBT_PROJECT ]]; then
+  base_key="$SBT_PROJECT / baseDirectory"
+  status "Asking sbt for $base_key"
+  set +e
+  BASE_OUT=$(./sbt -no-colors -Dsbt.supershell=false "show $base_key" 2>&1)
+  BASE_RC=$?
+  set -e
+  if [[ $BASE_RC -ne 0 ]]; then
+    echo "----- ./sbt show output -----" >&2
+    echo "$BASE_OUT" >&2
+    echo "-----------------------------" >&2
+    fail "./sbt 'show $base_key' failed (exit $BASE_RC)"
+  fi
+  # The base dir is an absolute path on its own `[info]` line. Take the last
+  # absolute path that is an existing directory and is not inside a target/ tree.
+  while IFS= read -r cand; do
+    [[ -n $cand ]] || continue
+    [[ $cand == *"/target/"* ]] && continue
+    [[ -d $cand ]] && PROJECT_BASE=$cand
+  done < <(printf '%s\n' "$BASE_OUT" | strip_ansi | grep -oE '/[^[:space:]]+' || true)
+  # Fallback: a subproject whose directory name matches its id.
+  if [[ -z $PROJECT_BASE || ! -d $PROJECT_BASE ]] && [[ -d "$BUILD_DIR/$SBT_PROJECT" ]]; then
+    PROJECT_BASE="$BUILD_DIR/$SBT_PROJECT"
+  fi
+  if [[ -z $PROJECT_BASE || ! -d $PROJECT_BASE ]]; then
+    echo "----- ./sbt show output -----" >&2
+    echo "$BASE_OUT" >&2
+    echo "-----------------------------" >&2
+    fail "could not determine $base_key from sbt output"
+  fi
+  status "Subproject base directory: ${PROJECT_BASE#$BUILD_DIR/}"
+fi
+
+# Prefer the subproject's Procfile (multi-project), fall back to the repo-root
+# Procfile (single-project, or a multi-project build that keeps its Procfile
+# at the root).
+PROCFILE_SRC=""
+if [[ -n $PROJECT_BASE && -f "$PROJECT_BASE/Procfile" ]]; then
+  PROCFILE_SRC="$PROJECT_BASE/Procfile"
+elif [[ -f "$BUILD_DIR/Procfile" ]]; then
+  PROCFILE_SRC="$BUILD_DIR/Procfile"
+fi
+
+# ---- assemble the slug ------------------------------------------------------
+# The slug is JUST the native binary plus (optionally) the Procfile. We build
+# it in a temp dir and then atomically replace the build dir contents, so the
+# source tree, ./sbt, project/, and target/ never reach the slug.
+#
+# The binary is placed at `bin/<name>` (with any `-out` suffix stripped for a
+# cleaner process name). bin/release then picks it as the default `web`
+# process. No JDK is bundled — a Scala Native binary does not need the JVM at
+# runtime, which is the whole point of this buildpack.
+BIN_NAME=$(basename "$BINARY")
+BIN_NAME=${BIN_NAME%-out}    # `hello-out` -> `hello`
+
+SLUG_TMP=$(mktemp -d)
+CLEANUP_PATHS+=("$SLUG_TMP")
+
+mkdir -p "$SLUG_TMP/bin"
+cp -a "$BINARY" "$SLUG_TMP/bin/$BIN_NAME"
+chmod +x "$SLUG_TMP/bin/$BIN_NAME"
+
+# Ship the applicable Procfile (subproject's for multi-project builds, else
+# the repo-root one) at the slug root, where Heroku expects it.
+if [[ -n $PROCFILE_SRC ]]; then
+  cp -a "$PROCFILE_SRC" "$SLUG_TMP/Procfile"
+  status "Using Procfile from ${PROCFILE_SRC#$BUILD_DIR/}"
+fi
+
+status "Replacing build dir with slug contents (binary only, source dropped)"
+cd /
+find "$BUILD_DIR" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
+cp -a "$SLUG_TMP"/. "$BUILD_DIR"/
+
+status "Slug root contents: $(cd "$BUILD_DIR" && ls -A)"

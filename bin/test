@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# Heroku testpack: test (Scala Native)
+# Usage: bin/test <BUILD_DIR> [ENV_DIR]
+#
+# Runs in each parallel test dyno against the slug produced by bin/test-compile.
+# The exit code IS the test result: zero = pass, non-zero = fail.
+#
+# `./sbt test` for a Scala Native project compiles the test sources to a native
+# test binary and runs it. This requires the LLVM/clang toolchain to be present
+# in the test image, just like the build.
+#
+# Heroku CI does NOT pass a CACHE_DIR here — the test dyno only sees the slug.
+# We point sbt at $BUILD_DIR/.heroku-sbt-cache (populated by bin/test-compile)
+# so dependency resolution doesn't have to re-download every jar.
+set -euo pipefail
+shopt -s dotglob nullglob
+
+BUILD_DIR=${1:-}
+ENV_DIR=${2:-}
+
+status() { echo "-----> $*"; }
+fail()   { echo " !     $*" >&2; exit 1; }
+
+[[ -n $BUILD_DIR ]] || fail "usage: bin/test <BUILD_DIR> [ENV_DIR]"
+[[ -d $BUILD_DIR ]] || fail "BUILD_DIR not found: $BUILD_DIR"
+
+BUILD_DIR=$(cd "$BUILD_DIR" && pwd)
+
+# ---- export user config vars from ENV_DIR -----------------------------------
+if [[ -n $ENV_DIR && -d $ENV_DIR ]]; then
+  for f in "$ENV_DIR"/*; do
+    [[ -f $f ]] || continue
+    name=$(basename "$f")
+    case "$name" in
+      PATH|GIT_DIR|LD_*|JAVA_TOOL_OPTIONS) continue ;;
+    esac
+    export "$name=$(cat "$f")"
+  done
+fi
+
+# ---- caching ----------------------------------------------------------------
+SLUG_CACHE="$BUILD_DIR/.heroku-sbt-cache"
+
+# shellcheck source=bin/util/sbt-env.sh
+. "$(dirname "$0")/util/sbt-env.sh"
+sbt_env_configure "$SLUG_CACHE"
+
+# ---- run tests --------------------------------------------------------------
+cd "$BUILD_DIR"
+[[ -f ./sbt ]] || fail "no ./sbt wrapper in $BUILD_DIR"
+chmod +x ./sbt
+
+status "Running ./sbt test"
+exec ./sbt test

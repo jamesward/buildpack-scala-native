@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# Heroku classic buildpack: detect
+# Usage: bin/detect <BUILD_DIR>
+#
+# Succeeds when BUILD_DIR looks like a Scala Native sbt project:
+#   * an sbt project with a project-local `./sbt` wrapper and a build.sbt, AND
+#   * the Scala Native sbt plugin is declared in the project's meta-build
+#     (project/*.sbt), i.e. `addSbtPlugin("org.scala-native" % "sbt-scala-native" % ...)`.
+#
+# The plugin check is what distinguishes a Scala Native app from a plain JVM
+# Scala app (which the sibling buildpack-scala handles). We key on the plugin
+# coordinate `sbt-scala-native` rather than `enablePlugins(ScalaNativePlugin)`
+# because the plugin can be enabled in a variety of ways (build.sbt,
+# project.scala, per-subproject) but must always be added under project/.
+set -euo pipefail
+shopt -s nullglob
+
+BUILD_DIR=${1:-}
+
+if [[ -z $BUILD_DIR ]]; then
+  echo "usage: bin/detect <BUILD_DIR>" >&2
+  exit 1
+fi
+
+# Must be an sbt project with a project-local wrapper.
+[[ -f "$BUILD_DIR/build.sbt" && -f "$BUILD_DIR/sbt" ]] || exit 1
+
+# The Scala Native plugin must be declared in the sbt meta-build (project/*.sbt).
+plugin_declared=0
+for f in "$BUILD_DIR"/project/*.sbt; do
+  [[ -f $f ]] || continue
+  if grep -Eq 'org\.scala-native|sbt-scala-native' "$f"; then
+    plugin_declared=1
+    break
+  fi
+done
+
+if [[ $plugin_declared -eq 1 ]]; then
+  echo "Scala Native (sbt-scala-native)"
+  exit 0
+fi
+
+exit 1

@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Thin project-local sbt wrapper for the sample app.
+#
+# Real Heroku apps ship a self-bootstrapping `./sbt` (the launcher script sbt
+# generates). To keep this fixture small we just delegate to whatever `sbt` is
+# on PATH — which, in the buildpack's target environment, is provided by the
+# JDK+sbt install that runs before this buildpack. The buildpack only requires
+# that a project-local `./sbt` exists and is runnable; it does not care how it
+# bootstraps.
+set -euo pipefail
+exec sbt "$@"

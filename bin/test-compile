@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+# Heroku testpack: test-compile (Scala Native)
+# Usage: bin/test-compile <BUILD_DIR> <CACHE_DIR> [ENV_DIR]
+#
+# Runs once during the Heroku CI test-setup phase. Produces the test slug
+# that's then used by every parallel test dyno running bin/test.
+#
+# Unlike bin/compile, we MUST NOT reduce BUILD_DIR to the native binary —
+# bin/test needs the full source tree (and the sbt toolchain) to compile and
+# run the Scala Native test binary.
+#
+# Strategy:
+#   * Use a cache root inside BUILD_DIR (.heroku-sbt-cache) so resolved jars
+#     end up in the test slug. The default Coursier cache (~/.cache/coursier)
+#     would NOT survive to the test dyno.
+#   * Warm that in-slug cache from CACHE_DIR at the start of the run, and
+#     write it back at the end. CACHE_DIR is preserved between CI runs but
+#     is not visible from bin/test.
+#   * Run `./sbt Test/compile` so all main + test sources compile and all
+#     deps are downloaded before the parallel test phase starts.
+set -euo pipefail
+shopt -s dotglob nullglob
+
+BUILD_DIR=${1:-}
+CACHE_DIR=${2:-}
+ENV_DIR=${3:-}
+
+status() { echo "-----> $*"; }
+fail()   { echo " !     $*" >&2; exit 1; }
+
+[[ -n $BUILD_DIR ]] || fail "usage: bin/test-compile <BUILD_DIR> <CACHE_DIR> [ENV_DIR]"
+[[ -d $BUILD_DIR ]] || fail "BUILD_DIR not found: $BUILD_DIR"
+[[ -n $CACHE_DIR ]] || fail "CACHE_DIR not provided"
+mkdir -p "$CACHE_DIR"
+
+BUILD_DIR=$(cd "$BUILD_DIR" && pwd)
+CACHE_DIR=$(cd "$CACHE_DIR" && pwd)
+
+# ---- export user config vars from ENV_DIR -----------------------------------
+if [[ -n $ENV_DIR && -d $ENV_DIR ]]; then
+  for f in "$ENV_DIR"/*; do
+    [[ -f $f ]] || continue
+    name=$(basename "$f")
+    case "$name" in
+      PATH|GIT_DIR|LD_*|JAVA_TOOL_OPTIONS) continue ;;
+    esac
+    export "$name=$(cat "$f")"
+  done
+fi
+
+# ---- caching ----------------------------------------------------------------
+# Cache lives inside BUILD_DIR so it ends up in the test slug. We seed it
+# from CACHE_DIR on entry and copy it back on exit so multiple CI runs share
+# resolved deps.
+SLUG_CACHE="$BUILD_DIR/.heroku-sbt-cache"
+PERSIST_CACHE="$CACHE_DIR/sbt-cache"
+
+if [[ -d $PERSIST_CACHE ]]; then
+  status "Warming in-slug sbt cache from CACHE_DIR"
+  mkdir -p "$SLUG_CACHE"
+  cp -a "$PERSIST_CACHE"/. "$SLUG_CACHE"/ 2>/dev/null || true
+fi
+
+# shellcheck source=bin/util/sbt-env.sh
+. "$(dirname "$0")/util/sbt-env.sh"
+sbt_env_configure "$SLUG_CACHE"
+
+# ---- compile main + test sources --------------------------------------------
+cd "$BUILD_DIR"
+[[ -f ./sbt ]] || fail "no ./sbt wrapper in $BUILD_DIR"
+chmod +x ./sbt
+
+status "Running ./sbt Test/compile"
+./sbt Test/compile
+
+# ---- persist cache back to CACHE_DIR for next CI run ------------------------
+status "Persisting sbt cache to CACHE_DIR for next CI run"
+mkdir -p "$PERSIST_CACHE"
+cp -a "$SLUG_CACHE"/. "$PERSIST_CACHE"/ 2>/dev/null || true
+
+# Make sure ./sbt stays executable in the slug (cp may strip exec bit through
+# some filesystems).
+chmod +x "$BUILD_DIR/sbt"
+
+status "Test slug ready (sources + caches under $BUILD_DIR)"
