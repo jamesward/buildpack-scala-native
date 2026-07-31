@@ -5,6 +5,9 @@
 # stub ./sbt so no real multi-project build (or toolchain) is required.
 set -euo pipefail
 
+# The stub ./sbt fakes nativeLink; no real toolchain is needed here.
+export SCALA_NATIVE_SKIP_APT=1
+
 here=$(cd "$(dirname "$0")" && pwd)
 buildpack=$(cd "$here/.." && pwd)
 

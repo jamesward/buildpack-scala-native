@@ -26,29 +26,39 @@ summarized [below](#how-it-differs-from-the-jvm-buildpack-scala-buildpack).
 
   and the target project calls `enablePlugins(ScalaNativePlugin)` in its
   `build.sbt`. The `nativeLink` task this provides is what the buildpack runs.
-- A **JDK** and the **Scala Native build toolchain** are on `PATH` during the
-  build:
-  - a JDK (to run sbt) — chain
-    [heroku/jvm](https://github.com/heroku/heroku-buildpack-jvm-common) first;
-  - **clang / LLVM** and the native link dependencies (for the default *immix*
-    GC build: `libunwind`, `zlib`; for the *boehm* GC: also `libgc`). On
-    Heroku these come from an
-    [apt buildpack](https://github.com/heroku/heroku-buildpack-apt) with an
-    `Aptfile`, e.g.:
+- A **JDK** is on `PATH` during the build (to run sbt). Chain
+  [heroku/jvm](https://github.com/heroku/heroku-buildpack-jvm-common) before
+  this buildpack.
+- The **Scala Native build toolchain** (clang/LLVM + native link libs) is
+  installed **by this buildpack itself** — you do *not* need the
+  `heroku-community/apt` buildpack or an `Aptfile`. Before running
+  `./sbt nativeLink`, `bin/compile` downloads and extracts a default toolchain
+  via apt (into a throwaway `.apt` prefix that never reaches the slug):
 
-    ```
-    clang
-    libstdc++-12-dev
-    libunwind-dev
-    zlib1g-dev
-    libgc-dev
-    ```
+  ```
+  clang  g++  libunwind-dev  zlib1g-dev  libssl-dev
+  ```
 
-  So a typical buildpack chain is:
+  (`clang`/`g++` for the compiler + C++ headers, `libunwind` for exception
+  unwinding, `zlib` for `java.util.zip`, `libssl-dev` for the common case of an
+  app that links OpenSSL. The default *immix* GC needs no `libgc`.)
+
+  - Need **extra** native packages (e.g. a different GC's `libgc-dev`, a DB
+    client lib, ...)? List them in an optional `Aptfile` at your repo root
+    (plain package names, one per line — the `:repo:`/`*.deb` line types of
+    heroku-community/apt are not supported) **or** set the
+    `SCALA_NATIVE_APT_PACKAGES` config var (space-separated). These are added
+    on top of the defaults.
+  - Need to **replace** the default set entirely? Set `SCALA_NATIVE_APT_DEFAULTS`.
+  - Toolchain already on the image (custom stack, or a base with clang)? Set
+    `SCALA_NATIVE_SKIP_APT=1` to skip the apt step. (The step is also skipped
+    automatically when `apt-get` is unavailable but `clang` is already on
+    `PATH`.)
+
+  So the buildpack chain is just:
 
   ```sh
   heroku buildpacks:add heroku/jvm
-  heroku buildpacks:add heroku-community/apt      # installs clang + native libs from Aptfile
   heroku buildpacks:add https://github.com/jamesward/buildpack-scala-native
   ```
 
@@ -59,14 +69,17 @@ summarized [below](#how-it-differs-from-the-jvm-buildpack-scala-buildpack).
   {
     "buildpacks": [
       { "url": "heroku/jvm" },
-      { "url": "heroku-community/apt" },
       { "url": "https://github.com/jamesward/buildpack-scala-native" }
     ]
   }
   ```
 
-  Order matters: the JDK and clang toolchain must be on `PATH` before
-  `./sbt nativeLink` runs. This buildpack must come **last**.
+  Order matters: the JDK must be on `PATH` before `./sbt nativeLink` runs, so
+  this buildpack must come **after** heroku/jvm.
+
+  The shared libraries the finished binary links at run time (e.g. `libssl`,
+  `libz`, `libunwind`) are provided by the Heroku stack image — nothing from
+  the build-time `.apt` needs to ship in the slug.
 
 ## What the slug looks like
 
@@ -176,8 +189,11 @@ API](https://devcenter.heroku.com/articles/testpack-api) via
 `bin/test-compile` and `bin/test`. `bin/test-compile` runs `./sbt Test/compile`
 (seeding an in-slug cache at `BUILD_DIR/.heroku-sbt-cache`), and `bin/test`
 runs `./sbt test` — which, for a Scala Native project, compiles the tests to a
-native test binary and runs it. Its exit code is the test result. The clang
-toolchain must therefore also be present in the CI test image.
+native test binary and runs it. Its exit code is the test result. `bin/test-compile`
+installs the clang toolchain the same way `bin/compile` does (into `.apt`, kept
+in the test slug with a `.profile.d` script so the parallel test dynos running
+`bin/test` also have `clang` on `PATH`) — so no `heroku-community/apt` buildpack
+is needed here either.
 
 ```json
 {
@@ -185,7 +201,6 @@ toolchain must therefore also be present in the CI test image.
     "test": {
       "buildpacks": [
         { "url": "heroku/jvm" },
-        { "url": "heroku-community/apt" },
         { "url": "https://github.com/jamesward/buildpack-scala-native" }
       ]
     }
@@ -247,12 +262,14 @@ buildpack-scala-native/
 │   ├── test-compile  # ./sbt Test/compile, leave source tree intact for tests
 │   ├── test          # ./sbt test (exit code = test result)
 │   └── util/
-│       └── sbt-env.sh   # shared cache + SBT_OPTS setup
+│       ├── sbt-env.sh     # shared cache + SBT_OPTS setup
+│       └── apt-install.sh # installs the clang/LLVM + native-lib toolchain
 └── test/
     ├── smoke.sh             # real end-to-end build (needs clang/LLVM+sbt)
     ├── smoke-stub.sh        # end-to-end with a stub sbt (no toolchain needed)
     ├── smoke-sbt2-stub.sh   # sbt 2.x ${OUT} output + default-Procfile (stub sbt)
     ├── smoke-subproject.sh  # verifies SBT_PROJECT scoping (stub sbt)
+    ├── apt-install-unit.sh  # unit tests for the apt toolchain installer
     └── fixtures/
         └── hello-native/    # minimal Scala Native sample app
 ```

@@ -15,6 +15,9 @@
 # the slug ships no Procfile and bin/release must default `web` to the binary.
 set -euo pipefail
 
+# The stub ./sbt fakes nativeLink; no real toolchain is needed here.
+export SCALA_NATIVE_SKIP_APT=1
+
 here=$(cd "$(dirname "$0")" && pwd)
 buildpack=$(cd "$here/.." && pwd)
 

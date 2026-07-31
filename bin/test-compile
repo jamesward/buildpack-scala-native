@@ -65,6 +65,15 @@ fi
 . "$(dirname "$0")/util/sbt-env.sh"
 sbt_env_configure "$SLUG_CACHE"
 
+# ---- provision the Scala Native build toolchain -----------------------------
+# Install into $BUILD_DIR/.apt so it stays in the test slug, and write a
+# .profile.d script so the parallel test dynos (which run bin/test) also get
+# clang/LLVM on PATH when they compile+run the native test binary.
+# shellcheck source=bin/util/apt-install.sh
+. "$(dirname "$0")/util/apt-install.sh"
+SCALA_NATIVE_APP_DIR="$BUILD_DIR" \
+  scala_native_apt_install "$BUILD_DIR/.apt" "$CACHE_DIR" "$BUILD_DIR/.profile.d"
+
 # ---- compile main + test sources --------------------------------------------
 cd "$BUILD_DIR"
 [[ -f ./sbt ]] || fail "no ./sbt wrapper in $BUILD_DIR"

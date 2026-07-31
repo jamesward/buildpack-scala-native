@@ -83,6 +83,14 @@ trap cleanup EXIT
 . "$(dirname "$0")/util/sbt-env.sh"
 sbt_env_configure "$CACHE_DIR"
 
+# ---- provision the Scala Native build toolchain -----------------------------
+# Install clang/LLVM + native link libs ourselves (no heroku-community/apt
+# buildpack or Aptfile required). Extracted into $BUILD_DIR/.apt, which the
+# slug rewrite below drops — so none of it reaches the runtime slug.
+# shellcheck source=bin/util/apt-install.sh
+. "$(dirname "$0")/util/apt-install.sh"
+SCALA_NATIVE_APP_DIR="$BUILD_DIR" scala_native_apt_install "$BUILD_DIR/.apt" "$CACHE_DIR"
+
 # ---- run sbt nativeLink and capture the produced binary ---------------------
 cd "$BUILD_DIR"
 [[ -f ./sbt ]] || fail "no ./sbt wrapper in $BUILD_DIR"
