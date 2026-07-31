@@ -128,9 +128,11 @@ scala_native_apt_install() {
 
   # Cache is valid only if BOTH the requested package set and the STACK are
   # unchanged; otherwise flush and re-seed the apt sources.
+  local cache_hit=0
   if [[ -f $pkgs_file ]] && [[ "$(cat "$pkgs_file")" == "${pkgs[*]}" ]] \
      && [[ "$cached_stack" == "${STACK:-}" ]]; then
     _sn_status "Reusing cached apt download"
+    cache_hit=1
   else
     _sn_status "apt cache miss (packages or stack changed) — refreshing"
     rm -rf "$cache_dir/apt"
@@ -148,6 +150,16 @@ scala_native_apt_install() {
   mkdir -p "$cache_dir/apt"
   echo "${STACK:-}"   > "$stack_file"
   echo "${pkgs[*]}"   > "$pkgs_file"
+
+  # Fast path: package set + stack unchanged AND the toolchain is already
+  # extracted at this (stable) apt_root — skip the download and extract, just
+  # re-export the env. This keeps clang at the same absolute path across builds
+  # (so sbt's cached nativeConfig stays valid) and avoids re-downloading ~150 MB.
+  if [[ $cache_hit -eq 1 && -x "$apt_root/usr/bin/clang" ]]; then
+    _sn_status "Toolchain already provisioned at $apt_root — skipping download"
+    _sn_export_toolchain_env "$apt_root" "$profile_dir"
+    return 0
+  fi
 
   local apt_version apt_force
   apt_version=$(apt-get -v | awk 'NR==1{print $2}')
@@ -170,7 +182,8 @@ scala_native_apt_install() {
   _sn_status "Downloading .debs (with dependencies)"
   apt-get "${apt_opts[@]}" -y "${apt_force[@]}" -d install --reinstall "${pkgs[@]}" 2>&1 | sed 's/^/       /'
 
-  # ---- extract ---------------------------------------------------------------
+  # ---- extract (into a clean root, since it may be a persisted cache dir) ----
+  rm -rf "$apt_root"
   mkdir -p "$apt_root"
   local deb
   for deb in "$apt_cache/archives/"*.deb; do
@@ -178,7 +191,21 @@ scala_native_apt_install() {
     dpkg -x "$deb" "$apt_root/"
   done
 
-  # ---- export env for the current build (so ./sbt nativeLink sees clang) ----
+  # Rewrite pkg-config prefixes to point inside the install root.
+  find "$apt_root" -type f -ipath '*/pkgconfig/*.pc' -print0 2>/dev/null \
+    | xargs -0 --no-run-if-empty -n1 sed -i -e "s!^prefix=\(.*\)\$!prefix=$apt_root\1!g" 2>/dev/null || true
+
+  _sn_export_toolchain_env "$apt_root" "$profile_dir"
+}
+
+# _sn_export_toolchain_env <apt_root> [profile_dir]
+#   Puts the extracted toolchain on the compiler/header/library search paths for
+#   the current build, and (if profile_dir given) writes a .profile.d script so
+#   a later runtime dyno (Heroku CI test dyno) also finds clang.
+_sn_export_toolchain_env() {
+  local apt_root=$1
+  local profile_dir=${2:-}
+
   export PATH="$apt_root/usr/bin:$PATH"
   export LD_LIBRARY_PATH="$apt_root/usr/lib/x86_64-linux-gnu:$apt_root/usr/lib:${LD_LIBRARY_PATH:-}"
   export LIBRARY_PATH="$apt_root/usr/lib/x86_64-linux-gnu:$apt_root/usr/lib:${LIBRARY_PATH:-}"
@@ -187,10 +214,8 @@ scala_native_apt_install() {
   export C_INCLUDE_PATH="$inc:${C_INCLUDE_PATH:-}"
   export CPLUS_INCLUDE_PATH="$inc:${CPLUS_INCLUDE_PATH:-}"
   export PKG_CONFIG_PATH="$apt_root/usr/lib/x86_64-linux-gnu/pkgconfig:$apt_root/usr/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
-
-  # Rewrite pkg-config prefixes to point inside .apt.
-  find "$apt_root" -type f -ipath '*/pkgconfig/*.pc' -print0 2>/dev/null \
-    | xargs -0 --no-run-if-empty -n1 sed -i -e "s!^prefix=\(.*\)\$!prefix=$apt_root\1!g" 2>/dev/null || true
+  # Scala Native also honours LLVM_BIN for toolchain discovery.
+  export LLVM_BIN="$apt_root/usr/bin"
 
   # ---- optional runtime profile script (for Heroku CI test dynos) -----------
   # A deploy build omits this (the slug is binary-only). bin/test-compile passes
@@ -205,6 +230,7 @@ export CPATH="$HOME/.apt/usr/include:$HOME/.apt/usr/include/x86_64-linux-gnu:${C
 export C_INCLUDE_PATH="$CPATH"
 export CPLUS_INCLUDE_PATH="$CPATH"
 export PKG_CONFIG_PATH="$HOME/.apt/usr/lib/x86_64-linux-gnu/pkgconfig:$HOME/.apt/usr/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+export LLVM_BIN="$HOME/.apt/usr/bin"
 PROFILE
   fi
 

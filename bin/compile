@@ -85,11 +85,17 @@ sbt_env_configure "$CACHE_DIR"
 
 # ---- provision the Scala Native build toolchain -----------------------------
 # Install clang/LLVM + native link libs ourselves (no heroku-community/apt
-# buildpack or Aptfile required). Extracted into $BUILD_DIR/.apt, which the
-# slug rewrite below drops — so none of it reaches the runtime slug.
+# buildpack or Aptfile required). We extract into a STABLE path under CACHE_DIR
+# rather than $BUILD_DIR/.apt: Scala Native records the discovered absolute
+# clang path in sbt 2.x's persisted task cache, and $BUILD_DIR is an ephemeral
+# /tmp/build_<hash> that changes every deploy — so a build-dir path would go
+# stale on the next build. CACHE_DIR is stable and persisted, which also lets
+# us skip re-downloading the ~150 MB toolchain on cache hits. Nothing here
+# reaches the slug (the rewrite below makes the slug binary-only).
 # shellcheck source=bin/util/apt-install.sh
 . "$(dirname "$0")/util/apt-install.sh"
-SCALA_NATIVE_APP_DIR="$BUILD_DIR" scala_native_apt_install "$BUILD_DIR/.apt" "$CACHE_DIR"
+SCALA_NATIVE_APP_DIR="$BUILD_DIR" \
+  scala_native_apt_install "$CACHE_DIR/scala-native-toolchain" "$CACHE_DIR"
 
 # ---- run sbt nativeLink and capture the produced binary ---------------------
 cd "$BUILD_DIR"
