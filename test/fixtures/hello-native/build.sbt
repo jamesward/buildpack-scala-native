@@ -17,5 +17,10 @@ nativeConfig ~= { c =>
 }
 
 // A native test framework so `./sbt test` (used by bin/test) has something to
-// run. munit publishes a Scala Native artifact (note the %%% cross-suffix).
-libraryDependencies += "org.scalameta" %%% "munit" % "1.0.2" % Test
+// run. Uses `%%` (native-artifact aware when the ScalaNativePlugin is enabled),
+// matching how real Scala Native apps declare dependencies.
+libraryDependencies += "org.scalameta" %% "munit" % "1.0.2" % Test
+
+// munit 1.0.2 pins an older scala-native test-interface than the 0.5.12 plugin;
+// downgrade sbt's strict eviction check to a warning so resolution succeeds.
+ThisBuild / evictionErrorLevel := Level.Warn

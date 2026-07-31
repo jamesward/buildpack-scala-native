@@ -125,25 +125,49 @@ if [[ $SBT_RC -ne 0 ]]; then
   fail "./sbt 'show $show_key' failed (exit $SBT_RC)"
 fi
 
-# Pull candidate absolute paths from the show output and keep the last one that
-# is an existing regular file (the produced executable).
+# Derive the produced binary path from the `show` output. `nativeLink` is a
+# `File`-typed task, but sbt prints it differently across major versions:
+#
+#   * sbt 1.x  — an absolute path, e.g.
+#       [info] /app/target/scala-3.3.4/hello-native
+#   * sbt 2.x  — a *cached VirtualFile* reference, e.g.
+#       [info] ${OUT}/native0.5/scala-3.8.4/cimdtest/cimdtest>sha256-<hash>/<size>
+#     where `${OUT}` is the build's output dir (`<BUILD_DIR>/target/out`) and the
+#     trailing `>sha256-.../<size>` is the content hash, not part of the path.
+#
+# We try both forms, then fall back to scanning the filesystem.
 BINARY=""
+
+# Form 1 (sbt 1.x): the last absolute path in the output that exists on disk.
 while IFS= read -r cand; do
   [[ -n $cand ]] || continue
   [[ -f $cand ]] && BINARY=$cand
 done < <(printf '%s\n' "$SBT_OUT" | strip_ansi | grep -oE '/[^[:space:]]+' || true)
 
-# Filesystem fallback: scala-native writes the executable directly under
-# target/scala-<ver>/ — named `<name>-out` (<= 0.5.7) or plain `<name>`
-# (>= 0.5.8). This makes the buildpack resilient to future sbt output-format
-# changes. We look one level below any `target/scala-*` dir (the binary is not
-# nested under `native/`), pick executable regular files that aren't jars, and
-# take the most recently modified one. When SBT_PROJECT is set the file lives
-# under that subproject's target/ tree, which is still matched by this glob.
+# Form 2 (sbt 2.x): resolve a `${OUT}/<rel>` reference. Take everything between
+# `${OUT}` and the first `>` (or whitespace), and anchor it at BUILD_DIR/target/out.
 if [[ -z $BINARY || ! -f $BINARY ]]; then
-  BINARY=$(find "$BUILD_DIR" -type f -perm -u+x -regextype posix-extended \
-             -regex '.*/target/scala-[^/]+/[^/]+' \
-             ! -name '*.jar' 2>/dev/null \
+  rel=$(printf '%s\n' "$SBT_OUT" | strip_ansi \
+        | grep -oE '\$\{OUT\}[^[:space:]>]+' | tail -1 || true)
+  if [[ -n $rel ]]; then
+    rel=${rel#'${OUT}'}                       # -> /native0.5/scala-.../<proj>/<proj>
+    cand="$BUILD_DIR/target/out${rel}"
+    [[ -f $cand ]] && BINARY=$cand
+  fi
+fi
+
+# Form 3 (filesystem fallback): locate the produced executable directly. This
+# covers both layouts and any future sbt output-format change:
+#   * sbt 1.x:  target/scala-<ver>/<name>[-out]
+#   * sbt 2.x:  target/out/native<abi>/scala-<ver>/<proj>/<proj>
+# We take executable regular files under target/, excluding object/IR/library
+# artifacts and the intermediate `native/`+`classes/` dirs, and pick the most
+# recently modified — which is the binary nativeLink just linked.
+if [[ -z $BINARY || ! -f $BINARY ]]; then
+  BINARY=$(find "$BUILD_DIR"/target -type f -perm -u+x \
+             ! -name '*.jar' ! -name '*.o' ! -name '*.ll' ! -name '*.so' \
+             ! -name '*.dylib' ! -name '*.class' ! -name '*.nir' ! -name '*.jimage' \
+             ! -path '*/native/*' ! -path '*/classes/*' 2>/dev/null \
            | while IFS= read -r f; do printf '%s\t%s\n' "$(stat -c %Y "$f" 2>/dev/null || echo 0)" "$f"; done \
            | sort -n | tail -1 | cut -f2- || true)
 fi

@@ -108,16 +108,23 @@ from there and ships it at the slug root, falling back to a repo-root
 `bin/compile` runs sbt twice, in two separate invocations:
 
 1. `./sbt nativeLink` — the Scala Native task that ahead-of-time compiles and
-   links the app into a native executable under
-   `target/scala-<version>/<name>` (older plugin releases used a `-out`
-   suffix: `<name>-out`).
+   links the app into a native executable. Its location depends on the sbt
+   major version:
+   - **sbt 1.x:** `target/scala-<version>/<name>` (older plugin releases used
+     a `-out` suffix: `<name>-out`).
+   - **sbt 2.x:** `target/out/native<abi>/scala-<version>/<proj>/<proj>`.
 2. `./sbt 'show Compile / nativeLink'` — `nativeLink` is a `File`-typed task,
-   so sbt's built-in `show` prints the absolute path of the produced binary.
+   so `show` prints its path. The printed form also differs by sbt version:
+   - **sbt 1.x** prints an absolute path, e.g. `/app/target/scala-3.3.4/hello`.
+   - **sbt 2.x** prints a *cached VirtualFile* reference, e.g.
+     `${OUT}/native0.5/scala-3.8.4/hello/hello>sha256-<hash>/<size>`, where
+     `${OUT}` is the build output dir (`<BUILD_DIR>/target/out`) and the
+     trailing `>sha256-.../<size>` is a content hash, not part of the path.
 
-The compile script grabs that path from the second invocation. If parsing
-ever fails, it falls back to scanning `target/scala-*/` for the executable it
-produced (matching both the `<name>` and legacy `<name>-out` conventions,
-ignoring jars and the intermediate `native/` object dir).
+The compile script understands both printed forms (resolving `${OUT}` against
+`target/out`). If parsing ever fails, it falls back to scanning `target/` for
+the freshly linked executable — covering both layouts and ignoring jars, object
+/ IR files, and the intermediate `native/` and `classes/` dirs.
 
 Two cold sbt boots (rather than a custom injected task) keeps the buildpack
 robust across sbt/plugin versions — `nativeLink` and `show` are stable,
@@ -199,11 +206,15 @@ toolchain must therefore also be present in the CI test image.
 
 ## Local tests
 
-Three test scripts live in `test/`:
+Four test scripts live in `test/`:
 
 - `test/smoke-stub.sh` — end-to-end `detect` → `compile` → `release` using a
-  **stub** `./sbt` (fakes `nativeLink`). Runs anywhere; **needs no clang**.
-  Asserts the slug is binary-only.
+  **stub** `./sbt` (fakes `nativeLink`, sbt 1.x-style absolute path). Runs
+  anywhere; **needs no clang**. Asserts the slug is binary-only.
+- `test/smoke-sbt2-stub.sh` — same flow but the stub reproduces sbt 2.x's
+  `${OUT}/…>sha256-…/<size>` output and `target/out/native…` layout (the exact
+  form the real Heroku build emits). Also checks the **default-Procfile** path.
+  Needs no clang.
 - `test/smoke-subproject.sh` — verifies `SBT_PROJECT` scoping with a stub
   `./sbt`. Needs no clang.
 - `test/smoke.sh` — a **real** build: runs an actual `./sbt nativeLink`,
@@ -213,6 +224,7 @@ Three test scripts live in `test/`:
 
 ```sh
 ./test/smoke-stub.sh
+./test/smoke-sbt2-stub.sh
 ./test/smoke-subproject.sh
 
 # real build — provide the toolchain however you like, e.g. via nix:
@@ -221,7 +233,7 @@ nix-shell -p sbt clang llvm boehmgc libunwind zlib which \
 ```
 
 The `test/fixtures/hello-native` directory is a minimal Scala Native sample
-(sbt 1.10.7, Scala 3.3.4, sbt-scala-native 0.5.8) used by all three.
+(sbt 2.0.4, Scala 3.3.4, sbt-scala-native 0.5.12) used by the real build.
 
 ## Layout
 
@@ -239,6 +251,7 @@ buildpack-scala-native/
 └── test/
     ├── smoke.sh             # real end-to-end build (needs clang/LLVM+sbt)
     ├── smoke-stub.sh        # end-to-end with a stub sbt (no toolchain needed)
+    ├── smoke-sbt2-stub.sh   # sbt 2.x ${OUT} output + default-Procfile (stub sbt)
     ├── smoke-subproject.sh  # verifies SBT_PROJECT scoping (stub sbt)
     └── fixtures/
         └── hello-native/    # minimal Scala Native sample app
