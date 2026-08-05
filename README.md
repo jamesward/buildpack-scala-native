@@ -82,6 +82,24 @@ summarized [below](#how-it-differs-from-the-jvm-buildpack-scala-buildpack).
   `libz`, `libunwind`) are provided by the Heroku stack image — nothing from
   the build-time `.apt` needs to ship in the slug.
 
+## Build mode (optimization)
+
+By default this buildpack links in Scala Native's **`release-fast`** mode rather
+than the sbt plugin's default `debug` mode, since a deploy is a production build.
+Release modes run the Scala Native optimizer (and, for `release-full`, LTO),
+producing a faster, smaller binary at the cost of longer build time.
+
+Override with the `SCALA_NATIVE_MODE` config var:
+
+```sh
+heroku config:set SCALA_NATIVE_MODE=release-full   # or release-fast | release-size | debug
+```
+
+`bin/compile` applies the mode by composing it onto `nativeConfig` at build time
+(`set nativeConfig ~= (_.withMode(...))`), so it takes effect without any change
+to your `build.sbt`, and stacks with whatever `nativeConfig` (e.g. linking
+options) your build already sets.
+
 ## What the slug looks like
 
 `bin/compile` replaces the build directory with **just the native binary and

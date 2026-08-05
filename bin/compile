@@ -115,8 +115,29 @@ else
   show_key="Compile / nativeLink"
 fi
 
-status "Running ./sbt $link_cmd"
-./sbt "$link_cmd"
+# Build in an optimized Scala Native mode (default release-fast) rather than the
+# plugin default (debug). Override with the SCALA_NATIVE_MODE config var:
+# debug | release-fast | release-full | release-size. We apply it as a session
+# `set` composed onto nativeConfig (so it overrides the app's default mode and
+# stacks with any linking options the app configures). The same `set` is
+# prepended to the `show` invocation below, so re-evaluating nativeLink there
+# does not relink in debug and clobber the optimized binary.
+SCALA_NATIVE_MODE=${SCALA_NATIVE_MODE:-release-fast}
+case "$SCALA_NATIVE_MODE" in
+  debug)        _sn_mode="Mode.debug" ;;
+  release-fast) _sn_mode="Mode.releaseFast" ;;
+  release-full) _sn_mode="Mode.releaseFull" ;;
+  release-size) _sn_mode="Mode.releaseSize" ;;
+  *) fail "unsupported SCALA_NATIVE_MODE '$SCALA_NATIVE_MODE' (use: debug | release-fast | release-full | release-size)" ;;
+esac
+if [[ -n $SBT_PROJECT ]]; then
+  set_mode="set $SBT_PROJECT/nativeConfig ~= (c => c.withMode(scala.scalanative.build.$_sn_mode))"
+else
+  set_mode="set nativeConfig ~= (c => c.withMode(scala.scalanative.build.$_sn_mode))"
+fi
+
+status "Running ./sbt $link_cmd (Scala Native mode: $SCALA_NATIVE_MODE)"
+./sbt "; $set_mode ; $link_cmd"
 
 # Ask sbt for the produced binary path. With sbt 2.0 we disable the supershell
 # so task output is plain, newline-terminated log lines instead of cursor-
@@ -129,7 +150,7 @@ status "Running ./sbt $link_cmd"
 # error path and always prints the captured output for triage.
 status "Asking sbt for $show_key"
 set +e
-SBT_OUT=$(./sbt -no-colors -Dsbt.supershell=false "show $show_key" 2>&1)
+SBT_OUT=$(./sbt -no-colors -Dsbt.supershell=false "; $set_mode ; show $show_key" 2>&1)
 SBT_RC=$?
 set -e
 if [[ $SBT_RC -ne 0 ]]; then
