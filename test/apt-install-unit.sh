@@ -22,7 +22,7 @@ echo "== package assembly =="
 # 1) defaults only
 unset SCALA_NATIVE_APP_DIR SCALA_NATIVE_APT_PACKAGES 2>/dev/null || true
 got=$(scala_native_apt_packages | tr '\n' ' ' | sed 's/ $//')
-check "defaults" "clang g++ libunwind-dev zlib1g-dev libssl-dev" "$got"
+check "defaults" "clang g++ libunwind-dev zlib1g-dev libssl-dev liburing-dev" "$got"
 
 # 2) Aptfile adds a package, dedups an existing one, ignores comments/:repo:/.deb
 app="$work/app"; mkdir -p "$app"
@@ -35,12 +35,12 @@ http://example/pkg.deb
 EOF
 got=$(SCALA_NATIVE_APP_DIR="$app" scala_native_apt_packages 2>/dev/null | tr '\n' ' ' | sed 's/ $//')
 check "Aptfile extras + dedup + ignore repo/.deb" \
-  "clang g++ libunwind-dev zlib1g-dev libssl-dev libgc-dev" "$got"
+  "clang g++ libunwind-dev zlib1g-dev libssl-dev liburing-dev libgc-dev" "$got"
 
 # 3) env var extras appended
 got=$(SCALA_NATIVE_APT_PACKAGES="cmake libpq-dev" scala_native_apt_packages | tr '\n' ' ' | sed 's/ $//')
 check "env var extras" \
-  "clang g++ libunwind-dev zlib1g-dev libssl-dev cmake libpq-dev" "$got"
+  "clang g++ libunwind-dev zlib1g-dev libssl-dev liburing-dev cmake libpq-dev" "$got"
 
 # 4) defaults override
 got=$(scala_native_apt_packages "clang libunwind-dev" | tr '\n' ' ' | sed 's/ $//')

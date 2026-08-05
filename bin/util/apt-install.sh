@@ -32,10 +32,13 @@
 _sn_status() { echo "-----> $*"; }
 _sn_warn()   { echo " !     $*" >&2; }
 
-# Default build toolchain for a Scala Native (immix GC) app that may use TLS.
-# clang/clang++ (compiler+linker driver), g++ (C++ stdlib headers), libunwind
-# (exception unwinding), zlib (java.util.zip), OpenSSL (common TLS shim dep).
-SCALA_NATIVE_APT_DEFAULT_PACKAGES="clang g++ libunwind-dev zlib1g-dev libssl-dev"
+# Default build toolchain for a Scala Native (immix GC) app. clang/clang++
+# (compiler+linker driver), g++ (C++ stdlib headers), libunwind (exception
+# unwinding), zlib (java.util.zip), OpenSSL (TLS shims, e.g. kyo-http), liburing
+# (io_uring shims, e.g. kyo-net). OpenSSL and liburing headers are commonly
+# needed by bundled C shims in the Scala ecosystem, and their static archives
+# let the resulting binary stay self-contained.
+SCALA_NATIVE_APT_DEFAULT_PACKAGES="clang g++ libunwind-dev zlib1g-dev libssl-dev liburing-dev"
 
 # scala_native_apt_packages [defaults]
 #   Prints the resolved apt package list, one per line, de-duplicated in order:

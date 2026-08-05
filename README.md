@@ -36,12 +36,13 @@ summarized [below](#how-it-differs-from-the-jvm-buildpack-scala-buildpack).
   via apt (into a throwaway `.apt` prefix that never reaches the slug):
 
   ```
-  clang  g++  libunwind-dev  zlib1g-dev  libssl-dev
+  clang  g++  libunwind-dev  zlib1g-dev  libssl-dev  liburing-dev
   ```
 
   (`clang`/`g++` for the compiler + C++ headers, `libunwind` for exception
-  unwinding, `zlib` for `java.util.zip`, `libssl-dev` for the common case of an
-  app that links OpenSSL. The default *immix* GC needs no `libgc`.)
+  unwinding, `zlib` for `java.util.zip`, `libssl-dev` for apps that link OpenSSL
+  (e.g. `kyo-http`'s TLS shim), `liburing-dev` for apps that link io_uring
+  (e.g. `kyo-net`'s io_uring shim). The default *immix* GC needs no `libgc`.)
 
   - Need **extra** native packages (e.g. a different GC's `libgc-dev`, a DB
     client lib, ...)? List them in an optional `Aptfile` at your repo root
