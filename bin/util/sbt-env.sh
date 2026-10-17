@@ -39,3 +39,14 @@ sbt_env_configure() {
   export COURSIER_CACHE="$coursier_cache"
   export SBT_OPTS="${SBT_OPTS:-} -Dsbt.boot.directory=$sbt_boot -Dsbt.global.base=$sbt_global -Dsbt.ivy.home=$ivy_home -Divy.home=$ivy_home"
 }
+
+# The project's sbt launcher: ./sbta (sbt plus an MCP server, https://github.com/jamesward/sbta)
+# when the project has one, else ./sbt. Both take sbt's arguments. Sets SBT to "./sbta" or "./sbt"
+# and makes it executable; call it from the build directory.
+sbt_launcher() {
+  if [[ -f ./sbta ]]; then SBT=./sbta
+  elif [[ -f ./sbt ]]; then SBT=./sbt
+  else return 1
+  fi
+  chmod +x "$SBT"
+}

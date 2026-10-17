@@ -31,6 +31,8 @@ build="$work/build"
 cache="$work/cache"
 env_dir="$work/env"
 sbt_log="$work/sbt-stub.log"
+# The launcher name under test: ./sbt (default) or ./sbta (LAUNCHER=sbta, see smoke-sbta-stub.sh).
+launcher=${LAUNCHER:-sbt}
 mkdir -p "$build" "$cache" "$env_dir"
 
 echo "-----> Staging fixture into $build"
@@ -40,8 +42,9 @@ tar -C "$fixture" -cf - --exclude='./target' --exclude='./.heroku-sbt-cache' . \
 # The path scala-native would produce the binary at.
 fake_bin="$build/target/scala-3.3.4/hello-native-out"
 
-# Replace the thin ./sbt wrapper with a stub that needs no toolchain.
-cat > "$build/sbt" <<EOF
+# Replace the thin launcher with a stub that needs no toolchain.
+rm -f "$build/sbt" "$build/sbta"
+cat > "$build/$launcher" <<EOF
 #!/usr/bin/env bash
 printf '%s\n' "\$*" >> "$sbt_log"
 case "\$*" in
@@ -60,7 +63,7 @@ case "\$*" in
 esac
 exit 0
 EOF
-chmod +x "$build/sbt"
+chmod +x "$build/$launcher"
 
 # Plant a heroku/jvm-style build-time JDK contribution; it must NOT survive
 # into the runtime slug (a native binary needs no JVM).
@@ -93,7 +96,7 @@ echo "       bin/hello-native present and executable"
 echo "       Procfile preserved: $(cat "$build/Procfile")"
 
 # The slug must NOT contain any source / build tooling.
-for forbidden in build.sbt sbt project src target .jdk .heroku-sbt-cache; do
+for forbidden in build.sbt sbt sbta project src target .jdk .heroku-sbt-cache; do
   [[ -e "$build/$forbidden" ]] \
     && { echo "FAIL: slug still contains '$forbidden' (should be binary-only)"; exit 1; }
 done

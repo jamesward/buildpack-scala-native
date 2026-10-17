@@ -26,6 +26,7 @@ jobs:
       - uses: actions/checkout@v7
       # Stub-based tests: no Scala Native toolchain needed.
       - run: ./test/smoke-stub.sh
+      - run: ./test/smoke-sbta-stub.sh
       - run: ./test/smoke-sbt2-stub.sh
       - run: ./test/smoke-subproject.sh
       - run: ./test/apt-install-unit.sh
