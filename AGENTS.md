@@ -16,7 +16,7 @@ Full validation (CI runs the same):
 
 ```bash
 shellcheck -x --severity=warning bin/detect bin/compile bin/release bin/test bin/test-compile bin/util/*.sh
-./test/smoke-stub.sh && ./test/smoke-sbt2-stub.sh && ./test/smoke-subproject.sh && ./test/apt-install-unit.sh
+./test/smoke-stub.sh && ./test/smoke-sbta-stub.sh && ./test/smoke-sbt2-stub.sh && ./test/smoke-subproject.sh && ./test/apt-install-unit.sh
 ```
 
 `./test/smoke.sh` is the real end-to-end test: it needs a JDK, sbt and the LLVM/clang toolchain, and skips when they're missing. It isn't in CI.

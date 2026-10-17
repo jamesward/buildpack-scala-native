@@ -76,11 +76,10 @@ SCALA_NATIVE_APP_DIR="$BUILD_DIR" \
 
 # ---- compile main + test sources --------------------------------------------
 cd "$BUILD_DIR"
-[[ -f ./sbt ]] || fail "no ./sbt wrapper in $BUILD_DIR"
-chmod +x ./sbt
+sbt_launcher || fail "no ./sbta or ./sbt launcher in $BUILD_DIR"
 
-status "Running ./sbt Test/compile"
-./sbt Test/compile
+status "Running $SBT Test/compile"
+"$SBT" Test/compile
 
 # ---- persist cache back to CACHE_DIR for next CI run ------------------------
 status "Persisting sbt cache to CACHE_DIR for next CI run"
@@ -89,6 +88,6 @@ cp -a "$SLUG_CACHE"/. "$PERSIST_CACHE"/ 2>/dev/null || true
 
 # Make sure ./sbt stays executable in the slug (cp may strip exec bit through
 # some filesystems).
-chmod +x "$BUILD_DIR/sbt"
+chmod +x "$BUILD_DIR/${SBT#./}"
 
 status "Test slug ready (sources + caches under $BUILD_DIR)"

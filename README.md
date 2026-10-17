@@ -16,7 +16,9 @@ summarized [below](#how-it-differs-from-the-jvm-buildpack-scala-buildpack).
 
 ## Requirements
 
-- The app has a project-local `./sbt` wrapper at the repository root.
+- The app has a project-local launcher at the repository root: `./sbta`
+  ([sbta](https://github.com/jamesward/sbta), sbt with an MCP server), or `./sbt`.
+  The buildpack runs `./sbta` when it's there, else `./sbt`.
 - The app enables the Scala Native plugin. Concretely, `project/plugins.sbt`
   contains:
 

@@ -3,7 +3,7 @@
 # Usage: bin/detect <BUILD_DIR>
 #
 # Succeeds when BUILD_DIR looks like a Scala Native sbt project:
-#   * an sbt project with a project-local `./sbt` wrapper and a build.sbt, AND
+#   * an sbt project with a project-local `./sbta` (preferred) or `./sbt` launcher and a build.sbt, AND
 #   * the Scala Native sbt plugin is declared in the project's meta-build
 #     (project/*.sbt), i.e. `addSbtPlugin("org.scala-native" % "sbt-scala-native" % ...)`.
 #
@@ -23,7 +23,7 @@ if [[ -z $BUILD_DIR ]]; then
 fi
 
 # Must be an sbt project with a project-local wrapper.
-[[ -f "$BUILD_DIR/build.sbt" && -f "$BUILD_DIR/sbt" ]] || exit 1
+[[ -f "$BUILD_DIR/build.sbt" && ( -f "$BUILD_DIR/sbta" || -f "$BUILD_DIR/sbt" ) ]] || exit 1
 
 # The Scala Native plugin must be declared in the sbt meta-build (project/*.sbt).
 plugin_declared=0

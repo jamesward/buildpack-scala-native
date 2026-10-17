@@ -47,8 +47,7 @@ sbt_env_configure "$SLUG_CACHE"
 
 # ---- run tests --------------------------------------------------------------
 cd "$BUILD_DIR"
-[[ -f ./sbt ]] || fail "no ./sbt wrapper in $BUILD_DIR"
-chmod +x ./sbt
+sbt_launcher || fail "no ./sbta or ./sbt launcher in $BUILD_DIR"
 
-status "Running ./sbt test"
-exec ./sbt test
+status "Running $SBT test"
+exec "$SBT" test

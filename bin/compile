@@ -4,10 +4,10 @@
 #
 # Strategy:
 #   1. Point sbt/coursier/ivy caches at CACHE_DIR so deps persist between builds.
-#   2. Run `./sbt nativeLink` to ahead-of-time compile the app to a native
+#   2. Run `./sbta nativeLink` (or `./sbt`) to ahead-of-time compile the app to a native
 #      executable (this needs a JDK *and* an LLVM/clang toolchain at build
 #      time, but the produced binary needs neither at runtime).
-#   3. Run a second `./sbt 'show Compile / nativeLink'` and parse the printed
+#   3. Run a second `$SBT 'show Compile / nativeLink'` and parse the printed
 #      path. `nativeLink` is a `File`-typed task, so `show` prints the absolute
 #      path of the produced binary. Two cold starts is fine — the path
 #      (`target/scala-<ver>/<name>-out`) varies by Scala version and project
@@ -99,8 +99,7 @@ SCALA_NATIVE_APP_DIR="$BUILD_DIR" \
 
 # ---- run sbt nativeLink and capture the produced binary ---------------------
 cd "$BUILD_DIR"
-[[ -f ./sbt ]] || fail "no ./sbt wrapper in $BUILD_DIR"
-chmod +x ./sbt
+sbt_launcher || fail "no ./sbta or ./sbt launcher in $BUILD_DIR"
 
 # Multi-project support: if SBT_PROJECT is set (typically via
 # `heroku config:set SBT_PROJECT=<id>`), scope every sbt command to that
@@ -136,8 +135,8 @@ else
   set_mode="set nativeConfig ~= (c => c.withMode(scala.scalanative.build.$_sn_mode))"
 fi
 
-status "Running ./sbt $link_cmd (Scala Native mode: $SCALA_NATIVE_MODE)"
-./sbt "; $set_mode ; $link_cmd"
+status "Running $SBT $link_cmd (Scala Native mode: $SCALA_NATIVE_MODE)"
+"$SBT" "; $set_mode ; $link_cmd"
 
 # Ask sbt for the produced binary path. With sbt 2.0 we disable the supershell
 # so task output is plain, newline-terminated log lines instead of cursor-
@@ -150,14 +149,14 @@ status "Running ./sbt $link_cmd (Scala Native mode: $SCALA_NATIVE_MODE)"
 # error path and always prints the captured output for triage.
 status "Asking sbt for $show_key"
 set +e
-SBT_OUT=$(./sbt -no-colors -Dsbt.supershell=false "; $set_mode ; show $show_key" 2>&1)
+SBT_OUT=$("$SBT" -no-colors -Dsbt.supershell=false "; $set_mode ; show $show_key" 2>&1)
 SBT_RC=$?
 set -e
 if [[ $SBT_RC -ne 0 ]]; then
-  echo "----- ./sbt show output -----" >&2
+  echo "----- $SBT show output -----" >&2
   echo "$SBT_OUT" >&2
   echo "-----------------------------" >&2
-  fail "./sbt 'show $show_key' failed (exit $SBT_RC)"
+  fail "$SBT 'show $show_key' failed (exit $SBT_RC)"
 fi
 
 # Derive the produced binary path from the `show` output. `nativeLink` is a
@@ -208,7 +207,7 @@ if [[ -z $BINARY || ! -f $BINARY ]]; then
 fi
 
 if [[ -z $BINARY || ! -f $BINARY ]]; then
-  echo "----- ./sbt show output -----" >&2
+  echo "----- $SBT show output -----" >&2
   echo "$SBT_OUT" >&2
   echo "-----------------------------" >&2
   fail "could not determine the native binary produced by '$show_key'"
@@ -228,14 +227,14 @@ if [[ -n $SBT_PROJECT ]]; then
   base_key="$SBT_PROJECT / baseDirectory"
   status "Asking sbt for $base_key"
   set +e
-  BASE_OUT=$(./sbt -no-colors -Dsbt.supershell=false "show $base_key" 2>&1)
+  BASE_OUT=$("$SBT" -no-colors -Dsbt.supershell=false "show $base_key" 2>&1)
   BASE_RC=$?
   set -e
   if [[ $BASE_RC -ne 0 ]]; then
-    echo "----- ./sbt show output -----" >&2
+    echo "----- $SBT show output -----" >&2
     echo "$BASE_OUT" >&2
     echo "-----------------------------" >&2
-    fail "./sbt 'show $base_key' failed (exit $BASE_RC)"
+    fail "$SBT 'show $base_key' failed (exit $BASE_RC)"
   fi
   # The base dir is an absolute path on its own `[info]` line. Take the last
   # absolute path that is an existing directory and is not inside a target/ tree.
@@ -249,7 +248,7 @@ if [[ -n $SBT_PROJECT ]]; then
     PROJECT_BASE="$BUILD_DIR/$SBT_PROJECT"
   fi
   if [[ -z $PROJECT_BASE || ! -d $PROJECT_BASE ]]; then
-    echo "----- ./sbt show output -----" >&2
+    echo "----- $SBT show output -----" >&2
     echo "$BASE_OUT" >&2
     echo "-----------------------------" >&2
     fail "could not determine $base_key from sbt output"
@@ -270,7 +269,7 @@ fi
 # ---- assemble the slug ------------------------------------------------------
 # The slug is JUST the native binary plus (optionally) the Procfile. We build
 # it in a temp dir and then atomically replace the build dir contents, so the
-# source tree, ./sbt, project/, and target/ never reach the slug.
+# source tree, the launcher, project/, and target/ never reach the slug.
 #
 # The binary is placed at `bin/<name>` (with any `-out` suffix stripped for a
 # cleaner process name). bin/release then picks it as the default `web`
