@@ -62,7 +62,7 @@ echo "sbt invocations recorded:"
 nl -ba "$log" | sed 's/^/  /'
 echo
 
-grep -qx 'cli/nativeLink' "$log" \
+grep -qE '(^|; )cli/nativeLink$' "$log" \
   || { echo "FAIL: did not see 'cli/nativeLink' in sbt args"; exit 1; }
 
 grep -q 'show cli / Compile / nativeLink' "$log" \
