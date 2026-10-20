@@ -30,7 +30,7 @@ mkdir -p "$build/project" "$cache" "$env_dir"
 # Minimal Scala Native project so bin/detect passes.
 touch "$build/build.sbt"
 echo 'addSbtPlugin("org.scala-native" % "sbt-scala-native" % "0.5.12")' > "$build/project/plugins.sbt"
-echo 'sbt.version=2.0.4' > "$build/project/build.properties"
+echo 'sbt.version=2.0.11' > "$build/project/build.properties"
 # NOTE: intentionally NO Procfile — verifies the default-web behaviour.
 
 # The sbt 2.x layout: ${OUT} == $build/target/out
