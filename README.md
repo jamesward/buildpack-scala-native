@@ -269,7 +269,7 @@ nix-shell -p sbt clang llvm boehmgc libunwind zlib which \
 ```
 
 The `test/fixtures/hello-native` directory is a minimal Scala Native sample
-(sbt 2.0.4, Scala 3.3.4, sbt-scala-native 0.5.12) used by the real build.
+(sbt 2.0.11, Scala 3.3.4, sbt-scala-native 0.5.12) used by the real build.
 
 ## Layout
 
