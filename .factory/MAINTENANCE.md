@@ -2,10 +2,22 @@
 
 If there are other open PRs for this work, update that PR instead of creating a new one.
 
+Before anything else, if an open PR from the branch `claude/factory-sync` (titled `Factory sync:`)
+exists, merge it once its CI checks have run and passed (squash), then pull the default branch, so
+this run uses the synced files. It changes only factory-owned files, and the owner authorized these
+merges; the daily factory sync opens them without merging. Don't edit it. If its CI failed, or it
+has no checks, add the `needs-human` label, say so in the report, and continue without it.
+
 The run isn't finished until the Maintenance Routine's step 8 ("Improve the factory") is done:
 every finding it lists needs a link to the PR or issue you opened or updated for it in another
 repo (`jamesward/skills`, `jamesward/projects`, or a managed tool's repo), attached with `add_repo`.
-"Not filed" isn't an allowed outcome; if filing fails, quote the error. Do it before merging.
+"Not filed" isn't an allowed outcome; if filing fails, quote the error. Do it before merging. A
+filing failure doesn't block the merge: quote it in the report and merge as step 7 says.
+
+Merging the rolling PR doesn't end the run either: unless the run stopped, step 9 ("Work on open
+issues") comes next, also when the rolling PR had no changes. The final report needs an "Issues"
+line: each issue you worked on with its PR or comment, or "none eligible" with why (no open issues,
+or each one's reason for being skipped).
 
 Whenever a step says to stop, or the run can't finish: revert your uncommitted edits
 (`git checkout -- .`), don't push a branch or open a PR, and end with a report that quotes what
