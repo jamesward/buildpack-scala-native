@@ -71,6 +71,10 @@ mkdir -p "$build/.jdk/bin"
 printf '#!/bin/sh\necho fake-java\n' > "$build/.jdk/bin/java"
 chmod +x "$build/.jdk/bin/java"
 
+# AWS_EMULATOR_STUB_DEB (see smoke-aws-emulator-stub.sh): the app opts in to the AWS Emulator with a stub package.
+emulator_deb=${AWS_EMULATOR_STUB_DEB:-}
+[[ -z $emulator_deb ]] || echo "file://$emulator_deb" > "$build/.aws-emulator"
+
 echo
 echo "-----> bin/detect"
 detected=$("$buildpack/bin/detect" "$build")
@@ -102,12 +106,18 @@ for forbidden in build.sbt sbt sbta project src target .jdk .heroku-sbt-cache; d
 done
 echo "       source tree, ./sbt, target/, and .jdk all correctly dropped"
 
-# Slug root should contain exactly: bin/ and Procfile (order-independent).
+# Slug root should contain exactly: bin/ and Procfile (order-independent), plus the AWS Emulator when opted in.
 got=$(ls -A "$build" | sort)
-expected=$(printf '%s\n' bin Procfile | sort)
+if [[ -n $emulator_deb ]]; then
+  expected=$(printf '%s\n' bin Procfile aws-emulator .profile.d | sort)
+  [[ -x $build/aws-emulator/bin/aws-emulator ]] || { echo "FAIL: aws-emulator/bin/aws-emulator missing"; exit 1; }
+  [[ -f $build/.profile.d/aws-emulator.sh ]] || { echo "FAIL: .profile.d/aws-emulator.sh missing"; exit 1; }
+else
+  expected=$(printf '%s\n' bin Procfile | sort)
+fi
 [[ $got == "$expected" ]] \
   || { echo "FAIL: slug root has unexpected entries:"; printf '  %s\n' "$got"; exit 1; }
-echo "       slug root contains only bin/ and Procfile"
+echo "       slug root contains only: $(echo "$expected" | tr '\n' ' ')"
 
 echo
 echo "-----> bin/release"

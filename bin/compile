@@ -23,7 +23,8 @@
 # root project's `nativeLink`.
 #
 # Result: the slug root contains `bin/<name>` (the native executable) and,
-# if present, a `Procfile`. Procfile entries must be relative to the slug
+# if present, a `Procfile` (plus `aws-emulator/` and `.profile.d/` for apps
+# with a `.aws-emulator` file). Procfile entries must be relative to the slug
 # root (e.g. `web: bin/<name>`).
 
 set -euo pipefail
@@ -82,6 +83,8 @@ trap cleanup EXIT
 # shellcheck source=bin/util/sbt-env.sh
 . "$(dirname "$0")/util/sbt-env.sh"
 sbt_env_configure "$CACHE_DIR"
+# shellcheck source=bin/util/aws-emulator.sh
+. "$(dirname "$0")/util/aws-emulator.sh"
 
 # ---- provision the Scala Native build toolchain -----------------------------
 # Install clang/LLVM + native link libs ourselves (no heroku-community/apt
@@ -291,6 +294,9 @@ if [[ -n $PROCFILE_SRC ]]; then
   cp -a "$PROCFILE_SRC" "$SLUG_TMP/Procfile"
   status "Using Procfile from ${PROCFILE_SRC#$BUILD_DIR/}"
 fi
+
+# Apps that opt in with a `.aws-emulator` file also get the AWS Emulator (see bin/util/aws-emulator.sh).
+aws_emulator_install "$BUILD_DIR" "$SLUG_TMP" "$CACHE_DIR" || fail "could not install the AWS Emulator"
 
 status "Replacing build dir with slug contents (binary only, source dropped)"
 cd /

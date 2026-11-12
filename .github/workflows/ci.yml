@@ -18,7 +18,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - run: sudo apt-get update && sudo apt-get install -y shellcheck
-      - run: shellcheck -x --severity=warning bin/detect bin/compile bin/release bin/test bin/test-compile bin/util/*.sh
+      - run: shellcheck -x --severity=warning bin/detect bin/compile bin/release bin/test bin/test-compile bin/util/*.sh test/aws-emulator-unit.sh test/make-aws-emulator-deb.sh test/smoke-aws-emulator-stub.sh
 
   smoke:
     runs-on: ubuntu-latest
@@ -30,3 +30,5 @@ jobs:
       - run: ./test/smoke-sbt2-stub.sh
       - run: ./test/smoke-subproject.sh
       - run: ./test/apt-install-unit.sh
+      - run: ./test/aws-emulator-unit.sh
+      - run: ./test/smoke-aws-emulator-stub.sh

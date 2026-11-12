@@ -1,6 +1,6 @@
 # AGENTS.md: buildpack-scala-native
 
-Classic Heroku buildpack (bash) for Scala Native apps: runs `./sbt nativeLink` and ships the single native binary as the slug. Used in production by `cimdapp` (cimd.now), chained after `heroku/jvm`.
+Classic Heroku buildpack (bash) for Scala Native apps: runs `./sbt nativeLink` and ships the single native binary as the slug. Used in production by `cimdapp` (cimd.now), chained after `heroku/jvm`. Apps with a `.aws-emulator` file also get the AWS Emulator in the slug (used by `aws-emul-mcp`).
 
 ## Skills
 
@@ -15,8 +15,8 @@ None.
 Full validation (CI runs the same):
 
 ```bash
-shellcheck -x --severity=warning bin/detect bin/compile bin/release bin/test bin/test-compile bin/util/*.sh
-./test/smoke-stub.sh && ./test/smoke-sbta-stub.sh && ./test/smoke-sbt2-stub.sh && ./test/smoke-subproject.sh && ./test/apt-install-unit.sh
+shellcheck -x --severity=warning bin/detect bin/compile bin/release bin/test bin/test-compile bin/util/*.sh test/aws-emulator-unit.sh test/make-aws-emulator-deb.sh test/smoke-aws-emulator-stub.sh
+./test/smoke-stub.sh && ./test/smoke-sbta-stub.sh && ./test/smoke-sbt2-stub.sh && ./test/smoke-subproject.sh && ./test/apt-install-unit.sh && ./test/aws-emulator-unit.sh && ./test/smoke-aws-emulator-stub.sh
 ```
 
 `./test/smoke.sh` is the real end-to-end test: it needs a JDK, sbt and the LLVM/clang toolchain, and skips when they're missing. It isn't in CI.

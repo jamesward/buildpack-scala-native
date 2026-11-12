@@ -240,9 +240,35 @@ is needed here either.
 | slug contents | `bin/`, `lib/*.jar`, `.jdk/`, Procfile | **only** `bin/<name>` + Procfile |
 | detect signal | `build.sbt` + `./sbt` | `build.sbt` + `./sbt` + `sbt-scala-native` plugin |
 
+## AWS Emulator (optional)
+
+An app can ship the [AWS Emulator](https://github.com/aws/aws-emulator) (AWS's local emulator of AWS APIs) in its slug, to
+start emulators at run time. Opt in with a `.aws-emulator` file at the repository root:
+
+```sh
+touch .aws-emulator     # the latest LTS package for the build's architecture
+```
+
+The file's first non-comment line, if any, is the URL of the Debian package to install instead (for example a specific
+version); the `AWS_EMULATOR_PACKAGE_URL` config var overrides both. `bin/compile` downloads the package (cached in the
+build cache and re-downloaded only when the server has a newer one; if the download fails, a cached package is used with a
+warning), extracts it, and adds to the slug:
+
+```
+├── aws-emulator/
+│   ├── bin/aws-emulator     # the emulator (needs only libc)
+│   └── THIRD_PARTY_LICENSES
+└── .profile.d/aws-emulator.sh
+```
+
+At dyno start `.profile.d/aws-emulator.sh` puts `aws-emulator` on `PATH` and sets `AWS_EMULATOR_BIN` to its path, unless
+the app already set `AWS_EMULATOR_BIN`. The emulator adds about 265 MB to the compressed slug (Heroku's limit is 500 MB) and
+uses about 300 MB of memory per running emulator. Its usage telemetry is on by default; turn it off with
+`aws-emulator --telemetry off` or the `EMULATOR_TELEMETRY=off` config var.
+
 ## Local tests
 
-Four test scripts live in `test/`:
+These test scripts live in `test/`:
 
 - `test/smoke-stub.sh` — end-to-end `detect` → `compile` → `release` using a
   **stub** `./sbt` (fakes `nativeLink`, sbt 1.x-style absolute path). Runs
@@ -253,6 +279,10 @@ Four test scripts live in `test/`:
   Needs no clang.
 - `test/smoke-subproject.sh` — verifies `SBT_PROJECT` scoping with a stub
   `./sbt`. Needs no clang.
+- `test/aws-emulator-unit.sh` — unit tests for the optional AWS Emulator step
+  with a stub package built by `test/make-aws-emulator-deb.sh`; and
+  `test/smoke-aws-emulator-stub.sh` runs `smoke-stub.sh` for an app with a
+  `.aws-emulator` file. Need `dpkg-deb`, no network.
 - `test/smoke.sh` — a **real** build: runs an actual `./sbt nativeLink`,
   asserts the produced binary is a native executable that runs, and that the
   slug is binary-only. It **SKIPs** (exit 0) if `sbt`/`java`/`clang` aren't on
@@ -283,14 +313,18 @@ buildpack-scala-native/
 │   ├── test-compile  # ./sbt Test/compile, leave source tree intact for tests
 │   ├── test          # ./sbt test (exit code = test result)
 │   └── util/
-│       ├── sbt-env.sh     # shared cache + SBT_OPTS setup
-│       └── apt-install.sh # installs the clang/LLVM + native-lib toolchain
+│       ├── sbt-env.sh      # shared cache + SBT_OPTS setup
+│       ├── apt-install.sh  # installs the clang/LLVM + native-lib toolchain
+│       └── aws-emulator.sh # optionally adds the AWS Emulator to the slug
 └── test/
     ├── smoke.sh             # real end-to-end build (needs clang/LLVM+sbt)
     ├── smoke-stub.sh        # end-to-end with a stub sbt (no toolchain needed)
     ├── smoke-sbt2-stub.sh   # sbt 2.x ${OUT} output + default-Procfile (stub sbt)
     ├── smoke-subproject.sh  # verifies SBT_PROJECT scoping (stub sbt)
     ├── apt-install-unit.sh  # unit tests for the apt toolchain installer
+    ├── aws-emulator-unit.sh # unit tests for the AWS Emulator step (stub package)
+    ├── smoke-aws-emulator-stub.sh # smoke-stub.sh with a .aws-emulator file
+    ├── make-aws-emulator-deb.sh   # builds the stub package
     └── fixtures/
         └── hello-native/    # minimal Scala Native sample app
 ```
