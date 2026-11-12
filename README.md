@@ -263,7 +263,7 @@ warning), extracts it, and adds to the slug:
 
 At dyno start `.profile.d/aws-emulator.sh` puts `aws-emulator` on `PATH` and sets `AWS_EMULATOR_BIN` to its path, unless
 the app already set `AWS_EMULATOR_BIN`. The emulator adds about 265 MB to the compressed slug (Heroku's limit is 500 MB) and
-uses about 300 MB of memory per running emulator. Its usage telemetry is on by default; turn it off with
+uses about 180 MB of memory per running emulator, plus about 110 MB of binary pages shared by all of them. Its usage telemetry is on by default; turn it off with
 `aws-emulator --telemetry off` or the `EMULATOR_TELEMETRY=off` config var.
 
 ## Local tests
